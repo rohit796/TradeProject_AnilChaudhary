@@ -1,0 +1,115 @@
+================================================================================
+TRADEFLOW PLATFORM - APACHE KAFKA SETUP & OPERATIONS GUIDE (KRAFT MODE)
+File Location: database/kafka_setup.txt
+Kafka Root:    D:\TradeProject\kafka
+Broker Port:   localhost:9092
+================================================================================
+
+1. PREREQUISITES
+--------------------------------------------------------------------------------
+- Java JDK 17 or higher installed (verify with: java -version)
+- Environment variable JAVA_HOME pointing to your JDK directory
+- Apache Kafka 4.x (located in D:\TradeProject\kafka)
+
+
+2. FIRST TIME SETUP: KRAFT STORAGE INITIALIZATION
+--------------------------------------------------------------------------------
+Kafka runs in KRaft mode (no ZooKeeper required). If setting up on a new machine:
+
+Step 2.1: Open PowerShell or Command Prompt:
+cd D:\TradeProject\kafka
+
+Step 2.2: Generate a new Cluster UUID:
+.\bin\windows\kafka-storage.bat random-uuid
+(Example output: 4L622nShTiuipA1w6HCE2Q)
+
+Step 2.3: Format the Log Directory with the generated UUID:
+.\bin\windows\kafka-storage.bat format -t <YOUR_CLUSTER_UUID> -c .\config\kraft\server.properties
+
+
+3. STARTING KAFKA BROKER
+--------------------------------------------------------------------------------
+Open a dedicated terminal window:
+cd D:\TradeProject\kafka
+.\bin\windows\kafka-server-start.bat .\config\kraft\server.properties
+
+Kafka will start and listen on localhost:9092.
+Keep this terminal window running.
+
+
+4. CREATING REQUIRED TOPICS (3 SQL DOMAIN TABLES)
+--------------------------------------------------------------------------------
+TradeFlow uses 3 primary event streaming topics matching the 3 database tables:
+
+1) Topic: trade-events   (Matches SQL table: trade_details)
+   Partition Key: trade_id
+   Partitions: 3, Replication Factor: 1
+   Command:
+   .\bin\windows\kafka-topics.bat --create --topic trade-events --bootstrap-server localhost:9092 --partitions 3 --replication-factor 1 --if-not-exists
+
+2) Topic: client-events  (Matches SQL table: client_details)
+   Partition Key: client_id
+   Partitions: 3, Replication Factor: 1
+   Command:
+   .\bin\windows\kafka-topics.bat --create --topic client-events --bootstrap-server localhost:9092 --partitions 3 --replication-factor 1 --if-not-exists
+
+3) Topic: stock-events   (Matches SQL table: stock_master)
+   Partition Key: symbol
+   Partitions: 3, Replication Factor: 1
+   Command:
+   .\bin\windows\kafka-topics.bat --create --topic stock-events --bootstrap-server localhost:9092 --partitions 3 --replication-factor 1 --if-not-exists
+
+*(Note: The Go backend also auto-creates these 3 topics on startup via backend/kafka/admin.go)*
+
+
+5. VERIFYING TOPICS
+--------------------------------------------------------------------------------
+List all active topics:
+.\bin\windows\kafka-topics.bat --list --bootstrap-server localhost:9092
+
+Describe topic details (partitions, offsets, replicas):
+.\bin\windows\kafka-topics.bat --describe --topic trade-events --bootstrap-server localhost:9092
+.\bin\windows\kafka-topics.bat --describe --topic client-events --bootstrap-server localhost:9092
+.\bin\windows\kafka-topics.bat --describe --topic stock-events --bootstrap-server localhost:9092
+
+
+6. LIVE MESSAGE MONITORING (CONSOLE CONSUMERS)
+--------------------------------------------------------------------------------
+Open a separate terminal to watch events stream in real time:
+
+Watch Trade Events:
+.\bin\windows\kafka-console-consumer.bat --topic trade-events --from-beginning --bootstrap-server localhost:9092 --property print.key=true
+
+Watch Client Updates:
+.\bin\windows\kafka-console-consumer.bat --topic client-events --from-beginning --bootstrap-server localhost:9092 --property print.key=true
+
+Watch Stock Updates:
+.\bin\windows\kafka-console-consumer.bat --topic stock-events --from-beginning --bootstrap-server localhost:9092 --property print.key=true
+
+
+7. PRODUCING TEST EVENTS MANUALLY (OPTIONAL)
+--------------------------------------------------------------------------------
+Send a test message from command line:
+.\bin\windows\kafka-console-producer.bat --topic trade-events --bootstrap-server localhost:9092
+Type your test JSON message and press Enter:
+{"trade_id":"TRD-999999","symbol":"TCS","trade_type":"BUY","quantity":10,"price":4100.0}
+Press Ctrl + C to exit.
+
+
+8. STOPPING KAFKA
+--------------------------------------------------------------------------------
+In the Kafka terminal window, press Ctrl + C, or run:
+cd D:\TradeProject\kafka
+.\bin\windows\kafka-server-stop.bat
+
+
+9. TROUBLESHOOTING
+--------------------------------------------------------------------------------
+Problem: Port 9092 already in use
+Solution: Check process using the port and terminate it:
+Get-NetTCPConnection -LocalPort 9092 -State Listen | Select-Object OwningProcess
+Stop-Process -Id <OwningProcessId> -Force
+
+Problem: "Cluster ID does not match" on startup
+Solution: Delete the data log directory specified in server.properties (usually /tmp/kraft-broker-logs or data/kraft-combined-logs) and re-run Step 2 to reformat storage.
+================================================================================

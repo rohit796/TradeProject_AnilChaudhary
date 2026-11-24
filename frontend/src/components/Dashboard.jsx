@@ -74,20 +74,6 @@ export default function Dashboard({ user, onLogout }) {
     return () => clearTimeout(timer);
   }, [filters, fetchTrades]);
 
-  // Periodic Real-Time Sync (every 4s) so database updates executed in SSMS reflect automatically in the UI
-  useEffect(() => {
-    const interval = setInterval(() => {
-      api.getTradeReports(filters).then(data => {
-        if (data && data.trades) {
-          setTrades(data.trades);
-          setTotalCount(data.total || data.trades.length);
-        }
-      }).catch(() => {});
-    }, 4000);
-
-    return () => clearInterval(interval);
-  }, [filters]);
-
   // Refresh all data on page: master data (clients, stocks) from MSSQL + trade reports from Elasticsearch
   const handleRefreshAll = useCallback(async () => {
     setLoading(true);

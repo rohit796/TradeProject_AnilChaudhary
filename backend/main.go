@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
 	"time"
@@ -97,21 +98,11 @@ func main() {
 			// 1. Check client_details for updates
 			updatedClients, newClientWatermark, err := database.GetUpdatedClients(clientWatermark)
 			if err == nil && len(updatedClients) > 0 {
-				log.Println("==================================================================")
-				log.Printf("[REALTIME CDC] ⚡ CLIENT TABLE UPDATE DETECTED: %d record(s)", len(updatedClients))
 				for _, c := range updatedClients {
-					log.Printf("[REALTIME CDC] 🔄 Client: %s | Code: %s | Name: %s %s | UpdatedOn: %s",
-						c.ClientID, c.ClientCode, c.FirstName, c.LastName, c.UpdatedOn.Format("15:04:05"))
-					// Stream to Kafka topic 'client-events'
-					if err := producer.PublishClient(context.Background(), &c); err != nil {
-						log.Printf("[REALTIME CDC] ⚠️ Kafka publish note: %v", err)
-					}
-					// Update Elasticsearch trade reports
-					count, err := esClient.UpdateClientInTradeReports(context.Background(), &c)
-					if err == nil {
-						log.Printf("[REALTIME CDC] 🚀 Elasticsearch synced client %s ('%s %s') across %d trade report(s)!",
-							c.ClientID, c.FirstName, c.LastName, count)
-					}
+					_ = producer.PublishClient(context.Background(), &c)
+					_, _ = esClient.UpdateClientInTradeReports(context.Background(), &c)
+					rowJSON, _ := json.Marshal(c)
+					log.Println(string(rowJSON))
 				}
 				clientWatermark = newClientWatermark
 			}
@@ -119,21 +110,11 @@ func main() {
 			// 2. Check stock_master for updates
 			updatedStocks, newStockWatermark, err := database.GetUpdatedStocks(stockWatermark)
 			if err == nil && len(updatedStocks) > 0 {
-				log.Println("==================================================================")
-				log.Printf("[REALTIME CDC] ⚡ STOCK TABLE UPDATE DETECTED: %d record(s)", len(updatedStocks))
 				for _, s := range updatedStocks {
-					log.Printf("[REALTIME CDC] 🔄 Stock: %s | Company: %s | Sector: %s | UpdatedOn: %s",
-						s.Symbol, s.CompanyName, s.Sector, s.UpdatedOn.Format("15:04:05"))
-					// Stream to Kafka topic 'stock-events'
-					if err := producer.PublishStock(context.Background(), &s); err != nil {
-						log.Printf("[REALTIME CDC] ⚠️ Kafka publish note: %v", err)
-					}
-					// Update Elasticsearch trade reports
-					count, err := esClient.UpdateStockInTradeReports(context.Background(), &s)
-					if err == nil {
-						log.Printf("[REALTIME CDC] 🚀 Elasticsearch synced stock %s ('%s') across %d trade report(s)!",
-							s.Symbol, s.CompanyName, count)
-					}
+					_ = producer.PublishStock(context.Background(), &s)
+					_, _ = esClient.UpdateStockInTradeReports(context.Background(), &s)
+					rowJSON, _ := json.Marshal(s)
+					log.Println(string(rowJSON))
 				}
 				stockWatermark = newStockWatermark
 			}
@@ -141,25 +122,13 @@ func main() {
 			// 3. Check trade_details for new or updated trades
 			newTrades, newTradeWatermark, err := database.GetIncrementalTrades(tradeWatermark)
 			if err == nil && len(newTrades) > 0 {
-				log.Println("==================================================================")
-				log.Printf("[REALTIME CDC] ⚡ TRADE TABLE UPDATE DETECTED: %d record(s)", len(newTrades))
-				for i, t := range newTrades {
-					log.Printf("[REALTIME CDC] 🔄 [%d/%d] Trade: %s | Client: %s (%s) | %s %s %d @ ₹%.2f (Val: ₹%.2f)",
-						i+1, len(newTrades), t.TradeID, t.ClientID, t.FirstName, t.Symbol, t.TradeType, t.Quantity, t.Price, t.TradeValue)
-
-					// Stream enriched trade report to Kafka topic 'trade-events'
-					if err := producer.PublishTradeReport(context.Background(), &t); err != nil {
-						log.Printf("[REALTIME CDC] ⚠️ Kafka publish note: %v", err)
-					}
-
-					// Direct index into Elasticsearch
+				for _, t := range newTrades {
+					_ = producer.PublishTradeReport(context.Background(), &t)
 					t.IndexedAt = time.Now()
-					if err := esClient.IndexTradeReport(context.Background(), &t); err == nil {
-						log.Printf("[REALTIME CDC] 🚀 Elasticsearch indexed %s in real-time!", t.TradeID)
-					}
+					_ = esClient.IndexTradeReport(context.Background(), &t)
+					rowJSON, _ := json.Marshal(t)
+					log.Println(string(rowJSON))
 				}
-				log.Printf("[REALTIME CDC] ✅ Completed sync for %d trade(s). UI is ready to fetch.", len(newTrades))
-				log.Println("==================================================================")
 				tradeWatermark = newTradeWatermark
 			}
 		}

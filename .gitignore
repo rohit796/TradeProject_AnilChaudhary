@@ -1,8 +1,5 @@
-# Ignore other non-project folders
+# Ignore non-project backup folder
 Bkp/
-.agent/
-skills/
-cmd/
 
 # Service directories & archives
 elasticsearch-*/
