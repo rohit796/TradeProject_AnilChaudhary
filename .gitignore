@@ -1,0 +1,40 @@
+# Ignore other non-project folders
+Bkp/
+.agent/
+skills/
+cmd/
+
+# Service directories & archives
+elasticsearch-*/
+kafka/
+kafka_*/
+*.zip
+*.tgz
+*.tar.gz
+
+# Binaries & executables
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+backend/trade-backend.exe
+
+# Frontend / Node
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+.npm/
+
+# Logs & temp
+*.log
+logs/
+tmp/
+temp/
+
+# OS / IDE artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
