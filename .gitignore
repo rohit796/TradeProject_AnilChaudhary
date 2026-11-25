@@ -3,8 +3,11 @@ Bkp/
 
 # Service directories & archives
 elasticsearch-*/
-kafka/
-kafka_*/
+# Leading slash: only the top-level Kafka install, NOT backend/kafka (Go source)
+/kafka/
+/kafka_*/
+# Original config backups
+*.orig
 *.zip
 *.tgz
 *.tar.gz

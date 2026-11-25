@@ -15,6 +15,21 @@ import (
 
 var DB *sql.DB
 
+// SQL Server DATETIME2 columns store a wall-clock time with no timezone. This database
+// stores local time (GETDATE() defaults, and InsertTrade writes local time), but the
+// go-mssqldb driver labels every DATETIME2 it reads as UTC. Left as-is, "14:43" (IST)
+// reaches the UI as "14:43Z" and the browser shows 20:13.
+//
+// asLocal re-labels the same wall clock with the server's local zone. Use it on values
+// that go to the API / Kafka / Elasticsearch. Do NOT use it on CDC watermarks: those are
+// sent back to SQL as query parameters and must stay exactly as the driver returned them.
+func asLocal(t time.Time) time.Time {
+	if t.IsZero() {
+		return t
+	}
+	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.Local)
+}
+
 // EnsureDB guarantees an active connection to SQL Server, reconnecting if needed
 func EnsureDB() (*sql.DB, error) {
 	if DB != nil {
@@ -95,6 +110,7 @@ func GetClients() ([]models.Client, error) {
 		if err := rows.Scan(&c.ClientID, &c.ClientCode, &c.FirstName, &c.LastName, &c.Email, &c.PhoneNumber, &c.PANNumber, &c.AccountType, &c.RiskCategory, &c.Status, &c.CreatedAt); err != nil {
 			return nil, err
 		}
+		c.CreatedAt = asLocal(c.CreatedAt)
 		clients = append(clients, c)
 	}
 	return clients, nil
@@ -257,10 +273,11 @@ func GetIncrementalTrades(watermark time.Time) ([]models.TradeReport, time.Time,
 		if err != nil {
 			continue
 		}
-		r.UpdatedOn = updatedOn
 		if updatedOn.After(newWatermark) {
-			newWatermark = updatedOn
+			newWatermark = updatedOn // raw driver value: stays comparable with SQL
 		}
+		r.TradeTime = asLocal(r.TradeTime)
+		r.UpdatedOn = asLocal(updatedOn)
 		reports = append(reports, r)
 	}
 	return reports, newWatermark, nil
@@ -294,8 +311,9 @@ func GetUpdatedClients(watermark time.Time) ([]models.Client, time.Time, error) 
 			continue
 		}
 		if c.UpdatedOn.After(newWatermark) {
-			newWatermark = c.UpdatedOn
+			newWatermark = c.UpdatedOn // raw driver value: stays comparable with SQL
 		}
+		c.CreatedAt, c.UpdatedOn = asLocal(c.CreatedAt), asLocal(c.UpdatedOn)
 		clients = append(clients, c)
 	}
 	return clients, newWatermark, nil
@@ -329,8 +347,9 @@ func GetUpdatedStocks(watermark time.Time) ([]models.Stock, time.Time, error) {
 			continue
 		}
 		if s.UpdatedOn.After(newWatermark) {
-			newWatermark = s.UpdatedOn
+			newWatermark = s.UpdatedOn // raw driver value: stays comparable with SQL
 		}
+		s.UpdatedOn = asLocal(s.UpdatedOn)
 		stocks = append(stocks, s)
 	}
 	return stocks, newWatermark, nil
@@ -367,7 +386,8 @@ func GetTradeReportByID(tradeID string) (*models.TradeReport, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.UpdatedOn = updatedOn
+	r.TradeTime = asLocal(r.TradeTime)
+	r.UpdatedOn = asLocal(updatedOn)
 	return &r, nil
 }
 
@@ -383,7 +403,7 @@ func GetAllTradesForSync() ([]models.TradeReport, error) {
 			t.trade_id, t.order_id, t.client_id, c.client_code, c.first_name, c.last_name, c.account_type,
 			t.symbol, s.company_name, s.sector, t.exchange, t.segment, t.trade_type,
 			t.quantity, t.price, t.trade_value, t.brokerage, t.taxes_charges, t.net_amount,
-			t.trade_status, t.trade_time
+			t.trade_status, t.trade_time, ISNULL(t.updated_on, t.trade_time)
 		FROM trade_details t
 		INNER JOIN client_details c ON t.client_id = c.client_id
 		INNER JOIN stock_master s ON t.symbol = s.symbol
@@ -402,11 +422,13 @@ func GetAllTradesForSync() ([]models.TradeReport, error) {
 			&r.TradeID, &r.OrderID, &r.ClientID, &r.ClientCode, &r.FirstName, &r.LastName, &r.AccountType,
 			&r.Symbol, &r.CompanyName, &r.Sector, &r.Exchange, &r.Segment, &r.TradeType,
 			&r.Quantity, &r.Price, &r.TradeValue, &r.Brokerage, &r.TaxesCharges, &r.NetAmount,
-			&r.TradeStatus, &r.TradeTime,
+			&r.TradeStatus, &r.TradeTime, &r.UpdatedOn,
 		)
 		if err != nil {
 			continue
 		}
+		r.TradeTime = asLocal(r.TradeTime)
+		r.UpdatedOn = asLocal(r.UpdatedOn)
 		reports = append(reports, r)
 	}
 	return reports, nil
@@ -434,7 +456,9 @@ func InsertTrade(t *models.Trade) error {
 		query,
 		t.TradeID, t.OrderID, t.ClientID, t.Symbol, t.Exchange, t.Segment, t.TradeType,
 		t.Quantity, t.Price, t.TradeValue, t.Brokerage, t.TaxesCharges, t.NetAmount,
-		t.TradeStatus, t.TradeTime,
+		// The UI sends trade_time in UTC ("...Z"). Convert to local time so the stored
+		// DATETIME2 wall clock matches GETDATE()-based columns and the seeded data.
+		t.TradeStatus, t.TradeTime.In(time.Local),
 	)
 	return err
 }

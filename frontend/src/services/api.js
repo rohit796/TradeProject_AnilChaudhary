@@ -65,7 +65,7 @@ export const api = {
     });
     if (!res.ok) {
       const err = await res.json();
-      throw new Error(err.message || 'Failed to place trade');
+      throw new Error(err.message || err.error || 'Failed to place trade');
     }
     return await res.json();
   },

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,7 +20,10 @@ import (
 func LoginHandler(c *gin.Context) {
 	var req models.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid request payload",
+			"message": "Please enter your username and password.",
+		})
 		return
 	}
 
@@ -35,7 +39,8 @@ func LoginHandler(c *gin.Context) {
 	if req.Username != envUser || req.Password != envPass {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error":   "Authentication failed",
-			"message": "Invalid credentials. Verify credentials configured in .env",
+			// Shown on the login screen: keep it generic, never reveal where credentials live
+			"message": "Invalid username or password. Please try again.",
 		})
 		return
 	}
@@ -148,8 +153,28 @@ func CreateTradeHandler(c *gin.Context) {
 	if trade.TradeValue == 0 {
 		trade.TradeValue = float64(trade.Quantity) * trade.Price
 	}
+	// Same defaults as the trade_details table. They must be set here because the INSERT
+	// always sends these columns, so SQL Server's own DEFAULTs never apply.
+	if trade.Exchange == "" {
+		trade.Exchange = "NSE"
+	}
+	if trade.Segment == "" {
+		trade.Segment = "EQUITY"
+	}
+	if trade.TradeStatus == "" {
+		trade.TradeStatus = "EXECUTED"
+	}
+	if trade.Brokerage == 0 {
+		trade.Brokerage = 20.00
+	}
 	if trade.NetAmount == 0 {
-		trade.NetAmount = trade.TradeValue + trade.Brokerage + trade.TaxesCharges
+		// Buy: value + charges | Sell: value - charges (as in the schema and seed data)
+		charges := trade.Brokerage + trade.TaxesCharges
+		if strings.EqualFold(trade.TradeType, "SELL") {
+			trade.NetAmount = trade.TradeValue - charges
+		} else {
+			trade.NetAmount = trade.TradeValue + charges
+		}
 	}
 
 	// 1. Transactional write to SQL Server
@@ -215,24 +240,11 @@ func SyncAllTradesFromSQLHandler(c *gin.Context) {
 	ctx := context.Background()
 
 	for i, t := range trades {
-		tradeModel := models.Trade{
-			TradeID:    t.TradeID,
-			OrderID:    t.OrderID,
-			ClientID:   t.ClientID,
-			Symbol:     t.Symbol,
-			Exchange:   t.Exchange,
-			Segment:    t.Segment,
-			TradeType:  t.TradeType,
-			Quantity:   t.Quantity,
-			Price:      t.Price,
-			TradeValue: t.TradeValue,
-			NetAmount:  t.NetAmount,
-			TradeTime:  t.TradeTime,
-		}
-
-		// 1. Emit to Kafka
+		// 1. Emit the FULL enriched report to Kafka. The consumer indexes every trade-events
+		// message into Elasticsearch, so a partial record (no status/brokerage/taxes/updated_on)
+		// would overwrite the complete document.
 		if kafka.GlobalProducer != nil {
-			_ = kafka.GlobalProducer.PublishTrade(ctx, &tradeModel)
+			_ = kafka.GlobalProducer.PublishTradeReport(ctx, &t)
 		}
 
 		// 2. Index to Elasticsearch
