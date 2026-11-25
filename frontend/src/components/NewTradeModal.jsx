@@ -48,13 +48,11 @@ export default function NewTradeModal({ isOpen, onClose, onTradeCreated, clients
         onClose();
       }, 1200);
     } catch (err) {
-      // Local fallback simulation if backend is not running yet
-      setSuccess(true);
-      setTimeout(() => {
-        setSuccess(false);
-        onTradeCreated(tradePayload);
-        onClose();
-      }, 1000);
+      // Never pretend a failed save worked: keep the form open and show why it failed
+      const offline = err instanceof TypeError; // fetch() throws TypeError when the backend is unreachable
+      setError(offline
+        ? 'Could not reach the trading server. Trade was NOT placed. Please try again.'
+        : `Trade was NOT placed: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -87,6 +85,14 @@ export default function NewTradeModal({ isOpen, onClose, onTradeCreated, clients
           <div className="p-4 bg-emerald-500/10 border-b border-emerald-500/30 flex items-center gap-3 text-emerald-400 text-sm">
             <CheckCircle2 className="w-5 h-5" />
             <span>Trade executed successfully and confirmed.</span>
+          </div>
+        )}
+
+        {/* Error Banner */}
+        {error && (
+          <div role="alert" className="p-4 bg-red-500/10 border-b border-red-500/30 flex items-center gap-3 text-red-400 text-sm">
+            <X className="w-5 h-5 shrink-0" />
+            <span>{error}</span>
           </div>
         )}
 
